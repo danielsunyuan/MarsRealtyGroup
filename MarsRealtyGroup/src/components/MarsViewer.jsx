@@ -59,11 +59,10 @@ const MarsViewer = () => {
     // Load Mars 3D tileset
     const loadMarsData = async () => {
       try {
-        // Load Mars tileset from Cesium Ion
         const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(3644333, {
-          enableCollision: true,
-        });
-        viewer.scene.primitives.add(tileset);
+            enableCollision: true,
+          });
+          viewer.scene.primitives.add(tileset);
       } catch (error) {
         console.error('Error loading Mars tileset:', error);
       }
