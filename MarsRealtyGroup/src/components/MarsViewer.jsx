@@ -25,8 +25,18 @@ const MarsViewer = () => {
   useEffect(() => {
     if (!cesiumContainer.current) return;
 
-    // Initialize Cesium viewer with Mars configuration
-    Cesium.Ellipsoid.default = Cesium.Ellipsoid.MARS;
+    // Initialize Cesium viewer with Mars 2000 Sphere to match USGS data
+    // USGS SIM3292 uses Mars 2000 Sphere IAU IAG: 3396190.0 radius (perfect sphere)
+    const mars2000Sphere = new Cesium.Ellipsoid(3396190, 3396190, 3396190);
+    Cesium.Ellipsoid.default = mars2000Sphere;
+    
+    // Verify dimensions match USGS spec
+    console.log('Mars 2000 Sphere:', mars2000Sphere.radii);
+    console.log('Matches USGS SIM3292:', 
+      mars2000Sphere.radii.x === 3396190 && 
+      mars2000Sphere.radii.y === 3396190 && 
+      mars2000Sphere.radii.z === 3396190
+    );
     
     const viewer = new Cesium.Viewer(cesiumContainer.current, {
       terrainProvider: false,
@@ -34,9 +44,9 @@ const MarsViewer = () => {
       baseLayerPicker: false,
       geocoder: false,
       shadows: false,
-      globe: new Cesium.Globe(Cesium.Ellipsoid.MARS),
+      globe: new Cesium.Globe(mars2000Sphere),
       skyBox: Cesium.SkyBox.createEarthSkyBox(),
-      skyAtmosphere: new Cesium.SkyAtmosphere(Cesium.Ellipsoid.MARS),
+      skyAtmosphere: new Cesium.SkyAtmosphere(mars2000Sphere),
     });
     
     viewerRef.current = viewer;
