@@ -34,6 +34,25 @@ const MarsViewer = () => {
   useEffect(() => {
     if (!cesiumContainer.current) return;
 
+    // Add custom CSS to position info box on the left
+    const style = document.createElement('style');
+    style.textContent = `
+      .cesium-infoBox {
+        top: 200px !important;
+        left: 10px !important;
+        right: auto !important;
+        width: 320px !important;
+        max-height: 60vh !important;
+      }
+      .cesium-infoBox-title {
+        background-color: rgba(0, 0, 0, 0.8) !important;
+      }
+      .cesium-infoBox-iframe {
+        max-height: 50vh !important;
+      }
+    `;
+    document.head.appendChild(style);
+
     // Initialize Cesium viewer with Mars 2000 Sphere to match USGS data
     // USGS SIM3292 uses Mars 2000 Sphere IAU IAG: 3396190.0 radius (perfect sphere)
     const mars2000Sphere = new Cesium.Ellipsoid(3396190, 3396190, 3396190);
@@ -135,6 +154,11 @@ const MarsViewer = () => {
         viewerRef.current.destroy();
         viewerRef.current = null;
       }
+      // Remove custom style
+      const customStyle = document.querySelector('style');
+      if (customStyle && customStyle.textContent.includes('cesium-infoBox')) {
+        customStyle.remove();
+      }
     };
   }, []);
 
@@ -204,7 +228,11 @@ const MarsViewer = () => {
 
     // Set entity properties for info box
     entity.name = entity.properties.text.getValue();
-    entity.description = createPickedFeatureDescription(entity);
+    entity.description = new Cesium.ConstantProperty(createPickedFeatureDescription(entity));
+    
+    // Set a comfortable zoom distance when clicking the camera button
+    // This creates an offset of 2 million meters from the feature
+    entity.viewFrom = new Cesium.Cartesian3(0, 0, 2000000);
   };
 
   // Create HTML for the info box
@@ -215,9 +243,44 @@ const MarsViewer = () => {
     const source = entity.properties.source?.getValue() || '';
     
     return `
-      ${imageURL ? `<img width="50%" style="float:left; margin: 0 1em 1em 0;" src="${imageURL}">` : ''}
-      <p>${description}</p>
-      ${sourceURL ? `<p>Source: <a target="_blank" href="${sourceURL}">${source}</a></p>` : ''}
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 10px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+          }
+          img {
+            max-width: 100%;
+            height: auto;
+          }
+          .float-img {
+            float: left;
+            width: 50%;
+            margin: 0 1em 1em 0;
+          }
+          p {
+            margin: 0.5em 0;
+          }
+          a {
+            color: #0066cc;
+            text-decoration: none;
+          }
+          a:hover {
+            text-decoration: underline;
+          }
+        </style>
+      </head>
+      <body>
+        ${imageURL ? `<img class="float-img" src="${imageURL}" alt="Feature image">` : ''}
+        <p>${description}</p>
+        ${sourceURL ? `<p style="margin-top: 1em;"><strong>Source:</strong> <a target="_blank" href="${sourceURL}">${source}</a></p>` : ''}
+      </body>
+      </html>
     `;
   };
 
