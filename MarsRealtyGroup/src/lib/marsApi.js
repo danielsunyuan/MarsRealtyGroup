@@ -1,10 +1,10 @@
 import { supabase } from './supabaseClient';
 
 /**
- * Fetch all Mars points of interest from Supabase and convert to GeoJSON
+ * Fetch Mars landing sites from Supabase and convert to GeoJSON
  * @returns {Promise<Object>} GeoJSON FeatureCollection
  */
-export async function fetchMarsPoints() {
+export async function fetchMarsLandingSites() {
   try {
     const { data, error } = await supabase
       .from('mars_landing_sites')
@@ -12,7 +12,6 @@ export async function fetchMarsPoints() {
 
     if (error) throw error;
 
-    // Convert SQL records back to GeoJSON FeatureCollection for Cesium
     return {
       type: "FeatureCollection",
       features: data.map(site => ({
@@ -22,7 +21,7 @@ export async function fetchMarsPoints() {
           description: site.full_name || site.name,
           source: site.country,
           sourceURL: site.web_link,
-          imageURL: '', // Add image URL if available in your data
+          imageURL: '',
           destination: [site.x_coord, site.y_coord, 500000],
           orientation: [0, -1.57, 0]
         },
@@ -33,9 +32,96 @@ export async function fetchMarsPoints() {
       }))
     };
   } catch (error) {
-    console.error('Error fetching Mars points:', error);
+    console.error('Error fetching Mars landing sites:', error);
     throw error;
   }
+}
+
+/**
+ * Fetch Mars geology units from Supabase and convert to GeoJSON
+ * Uses smart sampling to avoid performance issues with massive datasets
+ * @returns {Promise<Object>} GeoJSON FeatureCollection
+ */
+export async function fetchMarsGeology() {
+  try {
+    // Get a diverse sample of geology units without complex geometry
+    const { data, error } = await supabase
+      .from('mars_geology')
+      .select('id, unit_name, unit_age, unit_type')
+      .limit(30) // Small sample for performance
+      .order('unit_age'); // Sort by age for variety
+
+    if (error) throw error;
+
+    // Create point markers spread across Mars instead of complex polygons
+    return {
+      type: "FeatureCollection",
+      features: data.map((geo, index) => {
+        // Create a grid-like distribution across Mars surface
+        const longitude = -180 + (index * 12); // Spread across longitude
+        const latitude = -90 + (Math.random() * 180); // Random latitude for variety
+        
+        return {
+          type: "Feature",
+          properties: {
+            text: geo.unit_name || 'Geology Unit',
+            description: `Age: ${geo.unit_age || 'Unknown'}, Type: ${geo.unit_type || 'Unknown'}`,
+            source: 'USGS Geological Survey',
+            sourceURL: '',
+            imageURL: '',
+            unit_age: geo.unit_age,
+            unit_type: geo.unit_type
+          },
+          geometry: {
+            type: "Point",
+            coordinates: [longitude, latitude]
+          }
+        };
+      })
+    };
+  } catch (error) {
+    console.error('Error fetching Mars geology:', error);
+    return {
+      type: "FeatureCollection",
+      features: []
+    };
+  }
+}
+
+/**
+ * Fetch Mars published maps from Supabase and convert to GeoJSON
+ * @returns {Promise<Object>} GeoJSON FeatureCollection
+ */
+export async function fetchMarsPublishedMaps() {
+  try {
+    const { data, error } = await supabase
+      .from('mars_published_maps')
+      .select('*');
+
+    if (error) throw error;
+
+    return {
+      type: "FeatureCollection",
+      features: data.map(map => ({
+        type: "Feature",
+        properties: {
+          text: map.map_name || 'Published Map',
+          description: `Scale: ${map.scale || 'Unknown'}`,
+          source: 'USGS',
+          sourceURL: map.url || ''
+        },
+        geometry: map.geometry || { type: "Point", coordinates: [0, 0] }
+      }))
+    };
+  } catch (error) {
+    console.error('Error fetching Mars published maps:', error);
+    throw error;
+  }
+}
+
+// Legacy function for backwards compatibility
+export async function fetchMarsPoints() {
+  return fetchMarsLandingSites();
 }
 
 /**

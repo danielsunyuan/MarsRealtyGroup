@@ -1,7 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Cesium from 'cesium';
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import { fetchMarsPoints, addMarsPoint } from '../lib/marsApi';
+import { 
+  fetchMarsLandingSites,
+  fetchMarsPublishedMaps,
+  addMarsPoint 
+} from '../lib/marsApi';
 
 // Set the Cesium Ion access token
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJjNjM5MjQ2NC0yNzJjLTRhNGItYTQ4Zi1mMTVjOTI3ZDM1MjEiLCJpZCI6MzQ3MDA3LCJpYXQiOjE3NTk1NDU0NzF9.fatpCrTWb31z9rwisXNopl4r1y9puR6CiYDgBdDjQeI';
@@ -9,7 +13,10 @@ Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOi
 const MarsViewer = () => {
   const cesiumContainer = useRef(null);
   const viewerRef = useRef(null);
-  const dataSourceRef = useRef(null);
+  const dataSourcesRef = useRef({
+    landingSites: null,
+    publishedMaps: null
+  });
   const addModeHandlerRef = useRef(null);
   
   const [showDialog, setShowDialog] = useState(false);
@@ -20,6 +27,18 @@ const MarsViewer = () => {
     imageURL: '',
     source: 'User Contribution',
     sourceURL: ''
+  });
+  
+  // State for layer visibility
+  const [layers, setLayers] = useState({
+    landingSites: true,
+    publishedMaps: false
+  });
+  
+  // State for layer loading status
+  const [layerStatus, setLayerStatus] = useState({
+    landingSites: 'loaded',
+    publishedMaps: 'idle'
   });
 
   useEffect(() => {
@@ -90,11 +109,11 @@ const MarsViewer = () => {
         console.error('Error loading Mars tileset:', error);
       }
 
-      // Load points of interest
+      // Load initial layers
       try {
-        await loadPointsOfInterest(viewer);
+        await loadLayer('landingSites', viewer);
       } catch (error) {
-        console.error('Error loading points of interest:', error);
+        console.error('Error loading initial layers:', error);
       }
     };
 
@@ -129,26 +148,72 @@ const MarsViewer = () => {
     };
   }, []);
 
-  // Function to load points of interest
-  const loadPointsOfInterest = async (viewer) => {
+  // Function to load a specific layer
+  const loadLayer = async (layerName, viewer) => {
+    const v = viewer || viewerRef.current;
+    if (!v || dataSourcesRef.current[layerName]) return;
+
+    // Set loading status
+    setLayerStatus(prev => ({ ...prev, [layerName]: 'loading' }));
+
     try {
-      // Fetch from Supabase instead of static JSON
-      const sources = await fetchMarsPoints();
+      let geoJsonData;
+      let color = Cesium.Color.YELLOW;
       
-      const dataSource = await Cesium.GeoJsonDataSource.load(sources);
-      viewer.dataSources.add(dataSource);
-      dataSourceRef.current = dataSource;
+      switch(layerName) {
+        case 'landingSites':
+          geoJsonData = await fetchMarsLandingSites();
+          color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
+          break;
+        case 'publishedMaps':
+          geoJsonData = await fetchMarsPublishedMaps();
+          color = Cesium.Color.fromBytes(0, 191, 255); // Blue
+          break;
+        default:
+          return;
+      }
+
+      const dataSource = await Cesium.GeoJsonDataSource.load(geoJsonData);
+      v.dataSources.add(dataSource);
+      dataSourcesRef.current[layerName] = dataSource;
 
       const entities = dataSource.entities.values;
       entities.forEach((entity) => {
-        configureEntity(entity, viewer);
+        configureEntity(entity, v, color);
       });
+      
+      console.log(`Loaded ${layerName}: ${entities.length} features`);
+      setLayerStatus(prev => ({ ...prev, [layerName]: 'loaded' }));
     } catch (error) {
-      console.error('Error loading points from Supabase:', error);
+      console.error(`Error loading ${layerName}:`, error);
+      setLayerStatus(prev => ({ ...prev, [layerName]: 'error' }));
     }
   };
 
-  const configureEntity = (entity, viewer) => {
+  // Function to remove a layer
+  const removeLayer = (layerName) => {
+    const viewer = viewerRef.current;
+    const dataSource = dataSourcesRef.current[layerName];
+    
+    if (viewer && dataSource) {
+      viewer.dataSources.remove(dataSource);
+      dataSourcesRef.current[layerName] = null;
+    }
+  };
+
+  // Toggle layer visibility
+  const toggleLayer = async (layerName) => {
+    const newLayers = { ...layers, [layerName]: !layers[layerName] };
+    setLayers(newLayers);
+
+    if (newLayers[layerName]) {
+      await loadLayer(layerName);
+    } else {
+      removeLayer(layerName);
+    }
+  };
+
+  const configureEntity = (entity, viewer, color = Cesium.Color.fromBytes(243, 242, 99)) => {
     // Configure labels
     entity.label = new Cesium.LabelGraphics({
       text: entity.properties.text,
@@ -168,8 +233,8 @@ const MarsViewer = () => {
     // Configure point graphics
     entity.point = new Cesium.PointGraphics({
       pixelSize: 10,
-      color: Cesium.Color.fromBytes(243, 242, 99),
-      outlineColor: Cesium.Color.fromBytes(219, 218, 111),
+      color: color,
+      outlineColor: color.brighten(0.1, new Cesium.Color()),
       outlineWidth: 2,
       scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.0, 4.0e7, 0.1),
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
@@ -259,12 +324,17 @@ const MarsViewer = () => {
 
   // Handle form submission
   const handleSubmit = async () => {
-    if (!newPointData || !viewerRef.current || !dataSourceRef.current) return;
+    if (!newPointData || !viewerRef.current) return;
+    
+    // Ensure landing sites layer is loaded
+    if (!dataSourcesRef.current.landingSites) {
+      await loadLayer('landingSites');
+    }
 
     const { longitude, latitude, position } = newPointData;
 
-    // Create new entity
-    const entity = dataSourceRef.current.entities.add({
+    // Create new entity in landing sites layer
+    const entity = dataSourcesRef.current.landingSites.entities.add({
       position: position,
       properties: {
         text: formData.text,
@@ -277,7 +347,7 @@ const MarsViewer = () => {
       }
     });
 
-    configureEntity(entity, viewerRef.current);
+    configureEntity(entity, viewerRef.current, Cesium.Color.fromBytes(243, 242, 99));
 
     // Prepare data for backend
     const geoJsonFeature = {
@@ -304,8 +374,8 @@ const MarsViewer = () => {
     } catch (error) {
       console.error('Error saving to Supabase:', error);
       alert('Failed to save point. Please try again.');
-      // Optionally remove the entity if save failed
-      dataSourceRef.current.entities.remove(entity);
+      // Remove the entity if save failed
+      dataSourcesRef.current.landingSites.entities.remove(entity);
     }
 
     // Reset form and close dialog
@@ -346,7 +416,7 @@ const MarsViewer = () => {
       }}>
         <h3 style={{ margin: '0 0 10px 0' }}>Mars Explorer</h3>
         <p style={{ margin: '5px 0', fontSize: '14px' }}>
-          Click on yellow markers to learn about Mars landmarks
+          Click on markers to learn about Mars landmarks
         </p>
         <p style={{ margin: '5px 0', fontSize: '12px', fontStyle: 'italic' }}>
           Use mouse to navigate: Left click + drag to rotate, right click + drag to zoom, middle click + drag to pan
@@ -367,6 +437,71 @@ const MarsViewer = () => {
         >
           + Add Point of Interest
         </button>
+      </div>
+
+      {/* Layer Control Panel */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        background: 'rgba(0, 0, 0, 0.7)',
+        color: 'white',
+        padding: '15px',
+        borderRadius: '5px',
+        fontFamily: 'Arial, sans-serif',
+        minWidth: '200px'
+      }}>
+        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Data Layers</h3>
+        <p style={{ fontSize: '10px', color: '#ccc', margin: '0 0 10px 0', fontStyle: 'italic' }}>
+          Note: Large datasets are limited for performance
+        </p>
+        
+        <label style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={layers.landingSites}
+            onChange={() => toggleLayer('landingSites')}
+            style={{ marginRight: '8px', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center' }}>
+            <span style={{ 
+              width: '12px', 
+              height: '12px', 
+              backgroundColor: 'rgb(243, 242, 99)', 
+              borderRadius: '50%', 
+              marginRight: '8px',
+              display: 'inline-block'
+            }}></span>
+            Landing Sites
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={layers.publishedMaps}
+            onChange={() => toggleLayer('publishedMaps')}
+            disabled={layerStatus.publishedMaps === 'loading'}
+            style={{ marginRight: '8px', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center' }}>
+            <span style={{ 
+              width: '12px', 
+              height: '12px', 
+              backgroundColor: 'rgb(0, 191, 255)', 
+              borderRadius: '50%', 
+              marginRight: '8px',
+              display: 'inline-block'
+            }}></span>
+            Published Maps
+            {layerStatus.publishedMaps === 'loading' && (
+              <span style={{ fontSize: '10px', color: '#ccc', marginLeft: '5px' }}>Loading...</span>
+            )}
+            {layerStatus.publishedMaps === 'error' && (
+              <span style={{ fontSize: '10px', color: '#ff4444', marginLeft: '5px' }}>Failed</span>
+            )}
+          </span>
+        </label>
       </div>
 
       {/* Add Point Dialog */}
