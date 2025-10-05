@@ -3,7 +3,6 @@ import * as Cesium from 'cesium';
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { 
   fetchMarsLandingSites,
-  fetchMarsPublishedMaps,
   addMarsPoint 
 } from '../lib/marsApi';
 
@@ -14,8 +13,7 @@ const MarsViewer = () => {
   const cesiumContainer = useRef(null);
   const viewerRef = useRef(null);
   const dataSourcesRef = useRef({
-    landingSites: null,
-    publishedMaps: null
+    landingSites: null
   });
   const addModeHandlerRef = useRef(null);
   
@@ -31,14 +29,12 @@ const MarsViewer = () => {
   
   // State for layer visibility
   const [layers, setLayers] = useState({
-    landingSites: true,
-    publishedMaps: false
+    landingSites: true
   });
   
   // State for layer loading status
   const [layerStatus, setLayerStatus] = useState({
-    landingSites: 'loaded',
-    publishedMaps: 'idle'
+    landingSites: 'loaded'
   });
 
   useEffect(() => {
@@ -164,10 +160,6 @@ const MarsViewer = () => {
         case 'landingSites':
           geoJsonData = await fetchMarsLandingSites();
           color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
-          break;
-        case 'publishedMaps':
-          geoJsonData = await fetchMarsPublishedMaps();
-          color = Cesium.Color.fromBytes(0, 191, 255); // Blue
           break;
         default:
           return;
@@ -473,33 +465,6 @@ const MarsViewer = () => {
               display: 'inline-block'
             }}></span>
             Landing Sites
-          </span>
-        </label>
-
-        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={layers.publishedMaps}
-            onChange={() => toggleLayer('publishedMaps')}
-            disabled={layerStatus.publishedMaps === 'loading'}
-            style={{ marginRight: '8px', cursor: 'pointer' }}
-          />
-          <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center' }}>
-            <span style={{ 
-              width: '12px', 
-              height: '12px', 
-              backgroundColor: 'rgb(0, 191, 255)', 
-              borderRadius: '50%', 
-              marginRight: '8px',
-              display: 'inline-block'
-            }}></span>
-            Published Maps
-            {layerStatus.publishedMaps === 'loading' && (
-              <span style={{ fontSize: '10px', color: '#ccc', marginLeft: '5px' }}>Loading...</span>
-            )}
-            {layerStatus.publishedMaps === 'error' && (
-              <span style={{ fontSize: '10px', color: '#ff4444', marginLeft: '5px' }}>Failed</span>
-            )}
           </span>
         </label>
       </div>
