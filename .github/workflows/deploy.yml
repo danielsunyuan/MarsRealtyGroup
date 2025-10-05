@@ -2,9 +2,9 @@ name: Deploy to Vercel
 
 on:
   push:
-    branches: [ geo, main ]
+    branches: [ gh ]
   pull_request:
-    branches: [ geo, main ]
+    branches: [ gh ]
 
 jobs:
   deploy:
