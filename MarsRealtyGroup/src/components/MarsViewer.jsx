@@ -13,6 +13,7 @@ Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOi
 const MarsViewer = () => {
   const cesiumContainer = useRef(null);
   const viewerRef = useRef(null);
+  const initialCameraRef = useRef(null);
   const dataSourcesRef = useRef({
     marsFeatures: null
   });
@@ -30,6 +31,8 @@ const MarsViewer = () => {
   
   // State for showing/hiding all features
   const [showFeatures, setShowFeatures] = useState(true);
+  // Smooth pitch button state
+  const pitchAnimRef = useRef({ direction: 0, rafId: null });
   
   // State for custom info box
   const [selectedFeature, setSelectedFeature] = useState(null);
@@ -84,6 +87,16 @@ const MarsViewer = () => {
     viewerRef.current = viewer;
     viewer.scene.globe.show = false;
     const scene = viewer.scene;
+    // Ensure tilt is enabled for pitch controls
+    scene.screenSpaceCameraController.enableTilt = true;
+
+    // Save initial camera view
+    initialCameraRef.current = {
+      destination: viewer.camera.positionWC.clone(),
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    };
 
     // Configure Mars-like atmosphere
     scene.skyAtmosphere.atmosphereMieCoefficient = new Cesium.Cartesian3(
@@ -115,9 +128,9 @@ const MarsViewer = () => {
     const loadMarsData = async () => {
       try {
         const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(3644333, {
-            enableCollision: true,
-          });
-          viewer.scene.primitives.add(tileset);
+          enableCollision: true,
+        });
+        viewer.scene.primitives.add(tileset);
       } catch (error) {
         console.error('Error loading Mars tileset:', error);
       }
@@ -167,6 +180,28 @@ const MarsViewer = () => {
 
     loadMarsData();
 
+    // Ensure default orbit controls
+    if (viewerRef.current) {
+      const controller = viewerRef.current.scene.screenSpaceCameraController;
+      controller.enableLook = false;
+      controller.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
+      controller.inertiaSpin = 0.9;
+      controller.enableTilt = true;
+    }
+
+    // Keyboard controls for camera pitch (ArrowUp/ArrowDown)
+    const handleKeyDown = (e) => {
+      if (!viewerRef.current) return;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        try { viewerRef.current.camera.lookUp(Cesium.Math.toRadians(5)); } catch {}
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        try { viewerRef.current.camera.lookDown(Cesium.Math.toRadians(5)); } catch {}
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     // Cleanup
     return () => {
       if (addModeHandlerRef.current) {
@@ -178,9 +213,10 @@ const MarsViewer = () => {
       }
       // Remove custom style
       const customStyle = document.querySelector('style');
-      if (customStyle && customStyle.textContent.includes('cesium-infoBox')) {
+      if (customStyle && customStyle.textContent && customStyle.textContent.includes('cesium-infoBox')) {
         customStyle.remove();
       }
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
 
@@ -206,6 +242,31 @@ const MarsViewer = () => {
     } catch (error) {
       console.error('Error loading Mars features:', error);
     }
+  };
+
+  // Smooth pitch via buttons (press-and-hold)
+  const startPitch = (dir /*1 up, -1 down*/) => {
+    pitchAnimRef.current.direction = dir;
+    const step = () => {
+      if (!viewerRef.current) return;
+      const radiansPerSecond = Cesium.Math.toRadians(25); // speed
+      const dt = 1 / 60; // approx frame delta
+      const delta = radiansPerSecond * dt * dir;
+      if (dir > 0) viewerRef.current.camera.lookUp(Math.abs(delta));
+      else viewerRef.current.camera.lookDown(Math.abs(delta));
+      pitchAnimRef.current.rafId = requestAnimationFrame(step);
+    };
+    if (!pitchAnimRef.current.rafId) {
+      pitchAnimRef.current.rafId = requestAnimationFrame(step);
+    }
+  };
+
+  const stopPitch = () => {
+    if (pitchAnimRef.current.rafId) {
+      cancelAnimationFrame(pitchAnimRef.current.rafId);
+      pitchAnimRef.current.rafId = null;
+    }
+    pitchAnimRef.current.direction = 0;
   };
 
   // Toggle all features visibility
@@ -265,6 +326,34 @@ const MarsViewer = () => {
     });
   };
 
+  // Camera pitch helpers (UI buttons)
+  const pitchUp = () => {
+    if (!viewerRef.current) return;
+    const controller = viewerRef.current.scene.screenSpaceCameraController;
+    controller.enableTilt = true;
+    viewerRef.current.camera.lookUp(Cesium.Math.toRadians(5));
+  };
+
+  const pitchDown = () => {
+    if (!viewerRef.current) return;
+    const controller = viewerRef.current.scene.screenSpaceCameraController;
+    controller.enableTilt = true;
+    viewerRef.current.camera.lookDown(Cesium.Math.toRadians(5));
+  };
+
+  const resetPitch = () => {
+    if (!viewerRef.current || !initialCameraRef.current) return;
+    viewerRef.current.camera.flyTo({
+      destination: initialCameraRef.current.destination,
+      orientation: {
+        heading: initialCameraRef.current.heading,
+        pitch: initialCameraRef.current.pitch,
+        roll: initialCameraRef.current.roll,
+      },
+      duration: 1.2
+    });
+  };
+
   // Enable add point mode
   const enableAddPointMode = () => {
     const viewer = viewerRef.current;
@@ -301,8 +390,8 @@ const MarsViewer = () => {
         const globePosition = viewer.scene.globe.pick(ray, viewer.scene);
         console.log('Globe position:', globePosition);
         if (!globePosition) {
-          console.log('Failed to get position');
-          return;
+        console.log('Failed to get position');
+        return;
         }
       }
 
@@ -475,6 +564,97 @@ const MarsViewer = () => {
             Show Mars Features
           </span>
         </label>
+
+        {/* Smooth Pitch Buttons (press and hold) */}
+        <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          <button
+            onMouseDown={() => startPitch(1)}
+            onMouseUp={stopPitch}
+            onMouseLeave={stopPitch}
+            onTouchStart={() => startPitch(1)}
+            onTouchEnd={stopPitch}
+            title="Hold to pitch up"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬆︎ Hold
+          </button>
+          <button
+            onMouseDown={() => startPitch(-1)}
+            onMouseUp={stopPitch}
+            onMouseLeave={stopPitch}
+            onTouchStart={() => startPitch(-1)}
+            onTouchEnd={stopPitch}
+            title="Hold to pitch down"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬇︎ Hold
+          </button>
+        </div>
+
+        {/* Pitch Controls */}
+        <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          <button
+            onClick={pitchUp}
+            title="Pitch Up (Arrow Up)"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬆︎ Pitch
+          </button>
+          <button
+            onClick={pitchDown}
+            title="Pitch Down (Arrow Down)"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬇︎ Pitch
+          </button>
+          <button
+            onClick={resetPitch}
+            title="Reset Pitch"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⟲ Reset
+          </button>
+        </div>
       </div>
 
       {/* Custom Info Box */}
@@ -590,7 +770,7 @@ const MarsViewer = () => {
                 </a>
               </p>
             )}
-          </div>
+      </div>
         </div>
       )}
 
