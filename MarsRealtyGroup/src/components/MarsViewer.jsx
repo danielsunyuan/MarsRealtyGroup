@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Cesium from 'cesium';
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import sources from './sources.json' 
+import { fetchMarsPoints, addMarsPoint } from '../lib/marsApi';
 
 // Set the Cesium Ion access token
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJjNjM5MjQ2NC0yNzJjLTRhNGItYTQ4Zi1mMTVjOTI3ZDM1MjEiLCJpZCI6MzQ3MDA3LCJpYXQiOjE3NTk1NDU0NzF9.fatpCrTWb31z9rwisXNopl4r1y9puR6CiYDgBdDjQeI';
@@ -131,15 +131,21 @@ const MarsViewer = () => {
 
   // Function to load points of interest
   const loadPointsOfInterest = async (viewer) => {
+    try {
+      // Fetch from Supabase instead of static JSON
+      const sources = await fetchMarsPoints();
+      
+      const dataSource = await Cesium.GeoJsonDataSource.load(sources);
+      viewer.dataSources.add(dataSource);
+      dataSourceRef.current = dataSource;
 
-    const dataSource = await Cesium.GeoJsonDataSource.load(sources);
-    viewer.dataSources.add(dataSource);
-    dataSourceRef.current = dataSource;
-
-    const entities = dataSource.entities.values;
-    entities.forEach((entity) => {
-      configureEntity(entity, viewer);
-    });
+      const entities = dataSource.entities.values;
+      entities.forEach((entity) => {
+        configureEntity(entity, viewer);
+      });
+    } catch (error) {
+      console.error('Error loading points from Supabase:', error);
+    }
   };
 
   const configureEntity = (entity, viewer) => {
@@ -291,27 +297,15 @@ const MarsViewer = () => {
       }
     };
 
-    // Call backend API (placeholder)
+    // Save to Supabase
     try {
-      console.log('Sending to backend:', geoJsonFeature);
-      
-      // Uncomment when backend is ready:
-      // const response = await fetch('/api/mars-points', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify(geoJsonFeature)
-      // });
-      // 
-      // if (!response.ok) {
-      //   throw new Error('Failed to save point of interest');
-      // }
-      
+      const result = await addMarsPoint(geoJsonFeature);
+      console.log('Point saved successfully to Supabase:', result);
     } catch (error) {
-      console.error('Error saving to backend:', error);
+      console.error('Error saving to Supabase:', error);
+      alert('Failed to save point. Please try again.');
       // Optionally remove the entity if save failed
-      // dataSourceRef.current.entities.remove(entity);
+      dataSourceRef.current.entities.remove(entity);
     }
 
     // Reset form and close dialog
