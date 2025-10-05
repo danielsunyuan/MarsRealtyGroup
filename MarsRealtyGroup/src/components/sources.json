@@ -355,6 +355,60 @@
         {
             "type": "Feature",
             "properties": {
+                "text": "Chryse Planitia (Viking 1)",
+                "destination": [
+                    2817964.5123,
+                    -1521342.8934,
+                    1295834.7821
+                ],
+                "orientation": [
+                    5.7556,
+                    -0.6234,
+                    0
+                ],
+                "description": "Viking 1 was the first of two spacecraft, along with Viking 2, each consisting of an orbiter and a lander, sent to Mars as part of NASA's Viking program. Viking 1 was launched on August 20, 1975, and the lander touched down on Mars on July 20, 1976, the first successful Mars lander in history. The lander operated for 2,307 days (over 6 years) until November 13, 1982, when a faulty command from Earth caused the spacecraft to shut down. Viking 1 set a record for the longest Mars surface mission that stood for over 20 years.",
+                "sourceURL": "https://en.wikipedia.org/wiki/Viking_1",
+                "source": "Wikipedia",
+                "imageURL": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Viking_Lander_1_-_Sol_3_-_NOAA.jpg/1280px-Viking_Lander_1_-_Sol_3_-_NOAA.jpg"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    -47.95,
+                    22.48
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "text": "Utopia Planitia (Viking 2)",
+                "destination": [
+                    1486523.2341,
+                    2262847.9123,
+                    2513182.0456
+                ],
+                "orientation": [
+                    0.9876,
+                    -0.8234,
+                    0
+                ],
+                "description": "Viking 2 was launched on September 9, 1975, and the lander touched down on Mars on September 3, 1976, in the Utopia Planitia region. Viking 2 was part of NASA's Viking program and operated for 1,316 days (about 3.5 years) until its batteries failed on April 11, 1980. The mission provided valuable data about Martian weather, soil composition, and searched for signs of life. Together with Viking 1, these missions revolutionized our understanding of Mars and paved the way for future Mars exploration.",
+                "sourceURL": "https://en.wikipedia.org/wiki/Viking_2",
+                "source": "Wikipedia",
+                "imageURL": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Viking_Lander_2_being_encapsulated.jpg/1280px-Viking_Lander_2_being_encapsulated.jpg"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    134.26,
+                    47.97
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
                 "text": "Terra Meridiani",
                 "destination": [
                     3527603.695520859,

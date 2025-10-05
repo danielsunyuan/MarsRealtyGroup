@@ -3,6 +3,7 @@ import * as Cesium from 'cesium';
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { 
   fetchMarsLandingSites,
+  fetchMarsFeatures,
   addMarsPoint 
 } from '../lib/marsApi';
 
@@ -13,7 +14,7 @@ const MarsViewer = () => {
   const cesiumContainer = useRef(null);
   const viewerRef = useRef(null);
   const dataSourcesRef = useRef({
-    landingSites: null
+    marsFeatures: null
   });
   const addModeHandlerRef = useRef(null);
   
@@ -27,15 +28,8 @@ const MarsViewer = () => {
     sourceURL: ''
   });
   
-  // State for layer visibility
-  const [layers, setLayers] = useState({
-    landingSites: true
-  });
-  
-  // State for layer loading status
-  const [layerStatus, setLayerStatus] = useState({
-    landingSites: 'loaded'
-  });
+  // State for showing/hiding all features
+  const [showFeatures, setShowFeatures] = useState(true);
 
   useEffect(() => {
     if (!cesiumContainer.current) return;
@@ -105,11 +99,11 @@ const MarsViewer = () => {
         console.error('Error loading Mars tileset:', error);
       }
 
-      // Load initial layers
+      // Load Mars features
       try {
-        await loadLayer('landingSites', viewer);
+        await loadMarsFeatures(viewer);
       } catch (error) {
-        console.error('Error loading initial layers:', error);
+        console.error('Error loading Mars features:', error);
       }
     };
 
@@ -144,64 +138,37 @@ const MarsViewer = () => {
     };
   }, []);
 
-  // Function to load a specific layer
-  const loadLayer = async (layerName, viewer) => {
+  // Function to load Mars features
+  const loadMarsFeatures = async (viewer) => {
     const v = viewer || viewerRef.current;
-    if (!v || dataSourcesRef.current[layerName]) return;
-
-    // Set loading status
-    setLayerStatus(prev => ({ ...prev, [layerName]: 'loading' }));
+    if (!v || dataSourcesRef.current.marsFeatures) return;
 
     try {
-      let geoJsonData;
-      let color = Cesium.Color.YELLOW;
-      
-      switch(layerName) {
-        case 'landingSites':
-          geoJsonData = await fetchMarsLandingSites();
-          color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
-          break;
-        default:
-          return;
-      }
+      const geoJsonData = await fetchMarsFeatures();
+      const color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
 
       const dataSource = await Cesium.GeoJsonDataSource.load(geoJsonData);
       v.dataSources.add(dataSource);
-      dataSourcesRef.current[layerName] = dataSource;
+      dataSourcesRef.current.marsFeatures = dataSource;
 
       const entities = dataSource.entities.values;
       entities.forEach((entity) => {
         configureEntity(entity, v, color);
       });
       
-      console.log(`Loaded ${layerName}: ${entities.length} features`);
-      setLayerStatus(prev => ({ ...prev, [layerName]: 'loaded' }));
+      console.log(`Loaded Mars features: ${entities.length} features`);
     } catch (error) {
-      console.error(`Error loading ${layerName}:`, error);
-      setLayerStatus(prev => ({ ...prev, [layerName]: 'error' }));
+      console.error('Error loading Mars features:', error);
     }
   };
 
-  // Function to remove a layer
-  const removeLayer = (layerName) => {
-    const viewer = viewerRef.current;
-    const dataSource = dataSourcesRef.current[layerName];
+  // Toggle all features visibility
+  const toggleFeatures = () => {
+    const newShowFeatures = !showFeatures;
+    setShowFeatures(newShowFeatures);
     
-    if (viewer && dataSource) {
-      viewer.dataSources.remove(dataSource);
-      dataSourcesRef.current[layerName] = null;
-    }
-  };
-
-  // Toggle layer visibility
-  const toggleLayer = async (layerName) => {
-    const newLayers = { ...layers, [layerName]: !layers[layerName] };
-    setLayers(newLayers);
-
-    if (newLayers[layerName]) {
-      await loadLayer(layerName);
-    } else {
-      removeLayer(layerName);
+    if (dataSourcesRef.current.marsFeatures) {
+      dataSourcesRef.current.marsFeatures.show = newShowFeatures;
     }
   };
 
@@ -318,15 +285,15 @@ const MarsViewer = () => {
   const handleSubmit = async () => {
     if (!newPointData || !viewerRef.current) return;
     
-    // Ensure landing sites layer is loaded
-    if (!dataSourcesRef.current.landingSites) {
-      await loadLayer('landingSites');
+    // Ensure Mars features layer is loaded
+    if (!dataSourcesRef.current.marsFeatures) {
+      await loadMarsFeatures();
     }
 
     const { longitude, latitude, position } = newPointData;
 
-    // Create new entity in landing sites layer
-    const entity = dataSourcesRef.current.landingSites.entities.add({
+    // Create new entity in Mars features layer
+    const entity = dataSourcesRef.current.marsFeatures.entities.add({
       position: position,
       properties: {
         text: formData.text,
@@ -367,7 +334,7 @@ const MarsViewer = () => {
       console.error('Error saving to Supabase:', error);
       alert('Failed to save point. Please try again.');
       // Remove the entity if save failed
-      dataSourcesRef.current.landingSites.entities.remove(entity);
+      dataSourcesRef.current.marsFeatures.entities.remove(entity);
     }
 
     // Reset form and close dialog
@@ -431,7 +398,7 @@ const MarsViewer = () => {
         </button>
       </div>
 
-      {/* Layer Control Panel */}
+      {/* Feature Toggle Panel */}
       <div style={{
         position: 'absolute',
         top: '10px',
@@ -443,16 +410,13 @@ const MarsViewer = () => {
         fontFamily: 'Arial, sans-serif',
         minWidth: '200px'
       }}>
-        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Data Layers</h3>
-        <p style={{ fontSize: '10px', color: '#ccc', margin: '0 0 10px 0', fontStyle: 'italic' }}>
-          Note: Large datasets are limited for performance
-        </p>
+        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Display Options</h3>
         
-        <label style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
           <input
             type="checkbox"
-            checked={layers.landingSites}
-            onChange={() => toggleLayer('landingSites')}
+            checked={showFeatures}
+            onChange={toggleFeatures}
             style={{ marginRight: '8px', cursor: 'pointer' }}
           />
           <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center' }}>
@@ -464,7 +428,7 @@ const MarsViewer = () => {
               marginRight: '8px',
               display: 'inline-block'
             }}></span>
-            Landing Sites
+            Show Mars Features
           </span>
         </label>
       </div>

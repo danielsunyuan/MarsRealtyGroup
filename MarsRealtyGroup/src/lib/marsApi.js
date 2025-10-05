@@ -1,4 +1,18 @@
 import { supabase } from './supabaseClient';
+import sourcesData from '../components/sources.json';
+
+/**
+ * Fetch Mars features from sources.json
+ * @returns {Promise<Object>} GeoJSON FeatureCollection
+ */
+export async function fetchMarsFeatures() {
+  try {
+    return sourcesData;
+  } catch (error) {
+    console.error('Error fetching Mars features from sources.json:', error);
+    throw error;
+  }
+}
 
 /**
  * Fetch Mars landing sites from Supabase and convert to GeoJSON
@@ -6,34 +20,42 @@ import { supabase } from './supabaseClient';
  */
 export async function fetchMarsLandingSites() {
   try {
+    // Fetch from Supabase
     const { data, error } = await supabase
       .from('mars_landing_sites')
       .select('*');
 
     if (error) throw error;
 
+    const supabaseFeatures = data.map(site => ({
+      type: "Feature",
+      properties: {
+        text: site.name,
+        description: site.full_name || site.name,
+        source: site.country,
+        sourceURL: site.web_link,
+        imageURL: '',
+        destination: [site.x_coord, site.y_coord, 500000],
+        orientation: [0, -1.57, 0]
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [site.x_coord, site.y_coord]
+      }
+    }));
+
+    // Also fetch from sources.json
+    const sourcesFeatures = sourcesData.features || [];
+
+    // Merge both sources
     return {
       type: "FeatureCollection",
-      features: data.map(site => ({
-        type: "Feature",
-        properties: {
-          text: site.name,
-          description: site.full_name || site.name,
-          source: site.country,
-          sourceURL: site.web_link,
-          imageURL: '',
-          destination: [site.x_coord, site.y_coord, 500000],
-          orientation: [0, -1.57, 0]
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [site.x_coord, site.y_coord]
-        }
-      }))
+      features: [...supabaseFeatures, ...sourcesFeatures]
     };
   } catch (error) {
     console.error('Error fetching Mars landing sites:', error);
-    throw error;
+    // Fallback to sources.json if Supabase fails
+    return sourcesData;
   }
 }
 
