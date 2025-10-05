@@ -30,6 +30,9 @@ const MarsViewer = () => {
   
   // State for showing/hiding all features
   const [showFeatures, setShowFeatures] = useState(true);
+  
+  // State for custom info box
+  const [selectedFeature, setSelectedFeature] = useState(null);
 
   useEffect(() => {
     if (!cesiumContainer.current) return;
@@ -72,6 +75,7 @@ const MarsViewer = () => {
       baseLayerPicker: false,
       geocoder: false,
       shadows: false,
+      infoBox: false, // Disable default info box
       globe: new Cesium.Globe(mars2000Sphere),
       skyBox: Cesium.SkyBox.createEarthSkyBox(),
       skyAtmosphere: new Cesium.SkyAtmosphere(mars2000Sphere),
@@ -142,6 +146,24 @@ const MarsViewer = () => {
     handler.setInputAction(stopRotation, Cesium.ScreenSpaceEventType.RIGHT_DOWN);
     handler.setInputAction(stopRotation, Cesium.ScreenSpaceEventType.MIDDLE_DOWN);
     handler.setInputAction(stopRotation, Cesium.ScreenSpaceEventType.WHEEL);
+
+    // Handle entity clicks for custom info box
+    handler.setInputAction((click) => {
+      const pickedObject = viewer.scene.pick(click.position);
+      if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.properties) {
+        const entity = pickedObject.id;
+        setSelectedFeature({
+          name: entity.properties.text?.getValue() || entity.name,
+          description: entity.properties.description?.getValue() || '',
+          imageURL: entity.properties.imageURL?.getValue() || '',
+          sourceURL: entity.properties.sourceURL?.getValue() || '',
+          source: entity.properties.source?.getValue() || '',
+          entity: entity
+        });
+      } else {
+        setSelectedFeature(null);
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     loadMarsData();
 
@@ -226,62 +248,21 @@ const MarsViewer = () => {
       }, false),
     });
 
-    // Set entity properties for info box
+    // Set entity properties for zoom
     entity.name = entity.properties.text.getValue();
-    entity.description = new Cesium.ConstantProperty(createPickedFeatureDescription(entity));
     
     // Set a comfortable zoom distance when clicking the camera button
     // This creates an offset of 2 million meters from the feature
     entity.viewFrom = new Cesium.Cartesian3(0, 0, 2000000);
   };
 
-  // Create HTML for the info box
-  const createPickedFeatureDescription = (entity) => {
-    const imageURL = entity.properties.imageURL?.getValue() || '';
-    const description = entity.properties.description?.getValue() || '';
-    const sourceURL = entity.properties.sourceURL?.getValue() || '';
-    const source = entity.properties.source?.getValue() || '';
+  // Handle camera zoom to feature
+  const zoomToFeature = (entity) => {
+    if (!viewerRef.current || !entity) return;
     
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 10px;
-            font-size: 14px;
-            line-height: 1.6;
-            color: #333;
-          }
-          img {
-            max-width: 100%;
-            height: auto;
-          }
-          .float-img {
-            float: left;
-            width: 50%;
-            margin: 0 1em 1em 0;
-          }
-          p {
-            margin: 0.5em 0;
-          }
-          a {
-            color: #0066cc;
-            text-decoration: none;
-          }
-          a:hover {
-            text-decoration: underline;
-          }
-        </style>
-      </head>
-      <body>
-        ${imageURL ? `<img class="float-img" src="${imageURL}" alt="Feature image">` : ''}
-        <p>${description}</p>
-        ${sourceURL ? `<p style="margin-top: 1em;"><strong>Source:</strong> <a target="_blank" href="${sourceURL}">${source}</a></p>` : ''}
-      </body>
-      </html>
-    `;
+    viewerRef.current.flyTo(entity, {
+      offset: new Cesium.HeadingPitchRange(0, -0.5, 2000000)
+    });
   };
 
   // Enable add point mode
@@ -495,6 +476,123 @@ const MarsViewer = () => {
           </span>
         </label>
       </div>
+
+      {/* Custom Info Box */}
+      {selectedFeature && (
+        <div style={{
+          position: 'absolute',
+          top: '200px',
+          left: '10px',
+          maxWidth: '350px',
+          maxHeight: '60vh',
+          overflowY: 'auto',
+          background: 'rgba(0, 0, 0, 0.85)',
+          borderRadius: '8px',
+          padding: '0',
+          fontFamily: 'Arial, sans-serif',
+          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(10px)'
+        }}>
+          {/* Header with title and buttons */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 15px',
+            background: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '8px 8px 0 0',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              fontSize: '16px', 
+              color: 'white',
+              flex: 1
+            }}>
+              {selectedFeature.name}
+            </h3>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => zoomToFeature(selectedFeature.entity)}
+                style={{
+                  background: 'rgba(76, 175, 80, 0.8)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+                title="Zoom to feature"
+              >
+                📷 Zoom
+              </button>
+              <button
+                onClick={() => setSelectedFeature(null)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.8)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div style={{ padding: '15px' }}>
+            {selectedFeature.imageURL && (
+              <img 
+                src={selectedFeature.imageURL} 
+                alt={selectedFeature.name}
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  borderRadius: '6px',
+                  marginBottom: '12px'
+                }}
+              />
+            )}
+            
+            <p style={{
+              color: 'white',
+              fontSize: '14px',
+              lineHeight: '1.6',
+              margin: '0 0 12px 0'
+            }}>
+              {selectedFeature.description}
+            </p>
+            
+            {selectedFeature.sourceURL && (
+              <p style={{
+                color: '#aaa',
+                fontSize: '12px',
+                margin: '0'
+              }}>
+                <strong>Source:</strong>{' '}
+                <a 
+                  href={selectedFeature.sourceURL} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#4fc3f7',
+                    textDecoration: 'none'
+                  }}
+                >
+                  {selectedFeature.source}
+                </a>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Add Point Dialog */}
       {showDialog && (
