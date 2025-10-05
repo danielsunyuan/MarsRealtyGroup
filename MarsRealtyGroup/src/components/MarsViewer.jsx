@@ -3,6 +3,7 @@ import * as Cesium from 'cesium';
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { 
   fetchMarsLandingSites,
+  fetchMarsFeatures,
   addMarsPoint 
 } from '../lib/marsApi';
 
@@ -12,8 +13,9 @@ Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOi
 const MarsViewer = () => {
   const cesiumContainer = useRef(null);
   const viewerRef = useRef(null);
+  const initialCameraRef = useRef(null);
   const dataSourcesRef = useRef({
-    landingSites: null
+    marsFeatures: null
   });
   const addModeHandlerRef = useRef(null);
   
@@ -27,18 +29,35 @@ const MarsViewer = () => {
     sourceURL: ''
   });
   
-  // State for layer visibility
-  const [layers, setLayers] = useState({
-    landingSites: true
-  });
+  // State for showing/hiding all features
+  const [showFeatures, setShowFeatures] = useState(true);
+  // Smooth pitch button state
+  const pitchAnimRef = useRef({ direction: 0, rafId: null });
   
-  // State for layer loading status
-  const [layerStatus, setLayerStatus] = useState({
-    landingSites: 'loaded'
-  });
+  // State for custom info box
+  const [selectedFeature, setSelectedFeature] = useState(null);
 
   useEffect(() => {
     if (!cesiumContainer.current) return;
+
+    // Add custom CSS to position info box on the left
+    const style = document.createElement('style');
+    style.textContent = `
+      .cesium-infoBox {
+        top: 200px !important;
+        left: 10px !important;
+        right: auto !important;
+        width: 320px !important;
+        max-height: 60vh !important;
+      }
+      .cesium-infoBox-title {
+        background-color: rgba(0, 0, 0, 0.8) !important;
+      }
+      .cesium-infoBox-iframe {
+        max-height: 50vh !important;
+      }
+    `;
+    document.head.appendChild(style);
 
     // Initialize Cesium viewer with Mars 2000 Sphere to match USGS data
     // USGS SIM3292 uses Mars 2000 Sphere IAU IAG: 3396190.0 radius (perfect sphere)
@@ -59,6 +78,7 @@ const MarsViewer = () => {
       baseLayerPicker: false,
       geocoder: false,
       shadows: false,
+      infoBox: false, // Disable default info box
       globe: new Cesium.Globe(mars2000Sphere),
       skyBox: Cesium.SkyBox.createEarthSkyBox(),
       skyAtmosphere: new Cesium.SkyAtmosphere(mars2000Sphere),
@@ -67,6 +87,16 @@ const MarsViewer = () => {
     viewerRef.current = viewer;
     viewer.scene.globe.show = false;
     const scene = viewer.scene;
+    // Ensure tilt is enabled for pitch controls
+    scene.screenSpaceCameraController.enableTilt = true;
+
+    // Save initial camera view
+    initialCameraRef.current = {
+      destination: viewer.camera.positionWC.clone(),
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    };
 
     // Configure Mars-like atmosphere
     scene.skyAtmosphere.atmosphereMieCoefficient = new Cesium.Cartesian3(
@@ -98,18 +128,18 @@ const MarsViewer = () => {
     const loadMarsData = async () => {
       try {
         const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(3644333, {
-            enableCollision: true,
-          });
-          viewer.scene.primitives.add(tileset);
+          enableCollision: true,
+        });
+        viewer.scene.primitives.add(tileset);
       } catch (error) {
         console.error('Error loading Mars tileset:', error);
       }
 
-      // Load initial layers
+      // Load Mars features
       try {
-        await loadLayer('landingSites', viewer);
+        await loadMarsFeatures(viewer);
       } catch (error) {
-        console.error('Error loading initial layers:', error);
+        console.error('Error loading Mars features:', error);
       }
     };
 
@@ -130,7 +160,47 @@ const MarsViewer = () => {
     handler.setInputAction(stopRotation, Cesium.ScreenSpaceEventType.MIDDLE_DOWN);
     handler.setInputAction(stopRotation, Cesium.ScreenSpaceEventType.WHEEL);
 
+    // Handle entity clicks for custom info box
+    handler.setInputAction((click) => {
+      const pickedObject = viewer.scene.pick(click.position);
+      if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.properties) {
+        const entity = pickedObject.id;
+        setSelectedFeature({
+          name: entity.properties.text?.getValue() || entity.name,
+          description: entity.properties.description?.getValue() || '',
+          imageURL: entity.properties.imageURL?.getValue() || '',
+          sourceURL: entity.properties.sourceURL?.getValue() || '',
+          source: entity.properties.source?.getValue() || '',
+          entity: entity
+        });
+      } else {
+        setSelectedFeature(null);
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
     loadMarsData();
+
+    // Ensure default orbit controls
+    if (viewerRef.current) {
+      const controller = viewerRef.current.scene.screenSpaceCameraController;
+      controller.enableLook = false;
+      controller.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
+      controller.inertiaSpin = 0.9;
+      controller.enableTilt = true;
+    }
+
+    // Keyboard controls for camera pitch (ArrowUp/ArrowDown)
+    const handleKeyDown = (e) => {
+      if (!viewerRef.current) return;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        try { viewerRef.current.camera.lookUp(Cesium.Math.toRadians(5)); } catch {}
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        try { viewerRef.current.camera.lookDown(Cesium.Math.toRadians(5)); } catch {}
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
 
     // Cleanup
     return () => {
@@ -141,67 +211,71 @@ const MarsViewer = () => {
         viewerRef.current.destroy();
         viewerRef.current = null;
       }
+      // Remove custom style
+      const customStyle = document.querySelector('style');
+      if (customStyle && customStyle.textContent && customStyle.textContent.includes('cesium-infoBox')) {
+        customStyle.remove();
+      }
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
 
-  // Function to load a specific layer
-  const loadLayer = async (layerName, viewer) => {
+  // Function to load Mars features
+  const loadMarsFeatures = async (viewer) => {
     const v = viewer || viewerRef.current;
-    if (!v || dataSourcesRef.current[layerName]) return;
-
-    // Set loading status
-    setLayerStatus(prev => ({ ...prev, [layerName]: 'loading' }));
+    if (!v || dataSourcesRef.current.marsFeatures) return;
 
     try {
-      let geoJsonData;
-      let color = Cesium.Color.YELLOW;
-      
-      switch(layerName) {
-        case 'landingSites':
-          geoJsonData = await fetchMarsLandingSites();
-          color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
-          break;
-        default:
-          return;
-      }
+      const geoJsonData = await fetchMarsFeatures();
+      const color = Cesium.Color.fromBytes(243, 242, 99); // Yellow
 
       const dataSource = await Cesium.GeoJsonDataSource.load(geoJsonData);
       v.dataSources.add(dataSource);
-      dataSourcesRef.current[layerName] = dataSource;
+      dataSourcesRef.current.marsFeatures = dataSource;
 
       const entities = dataSource.entities.values;
       entities.forEach((entity) => {
         configureEntity(entity, v, color);
       });
       
-      console.log(`Loaded ${layerName}: ${entities.length} features`);
-      setLayerStatus(prev => ({ ...prev, [layerName]: 'loaded' }));
+      console.log(`Loaded Mars features: ${entities.length} features`);
     } catch (error) {
-      console.error(`Error loading ${layerName}:`, error);
-      setLayerStatus(prev => ({ ...prev, [layerName]: 'error' }));
+      console.error('Error loading Mars features:', error);
     }
   };
 
-  // Function to remove a layer
-  const removeLayer = (layerName) => {
-    const viewer = viewerRef.current;
-    const dataSource = dataSourcesRef.current[layerName];
+  // Smooth pitch via buttons (press-and-hold)
+  const startPitch = (dir /*1 up, -1 down*/) => {
+    pitchAnimRef.current.direction = dir;
+    const step = () => {
+      if (!viewerRef.current) return;
+      const radiansPerSecond = Cesium.Math.toRadians(25); // speed
+      const dt = 1 / 60; // approx frame delta
+      const delta = radiansPerSecond * dt * dir;
+      if (dir > 0) viewerRef.current.camera.lookUp(Math.abs(delta));
+      else viewerRef.current.camera.lookDown(Math.abs(delta));
+      pitchAnimRef.current.rafId = requestAnimationFrame(step);
+    };
+    if (!pitchAnimRef.current.rafId) {
+      pitchAnimRef.current.rafId = requestAnimationFrame(step);
+    }
+  };
+
+  const stopPitch = () => {
+    if (pitchAnimRef.current.rafId) {
+      cancelAnimationFrame(pitchAnimRef.current.rafId);
+      pitchAnimRef.current.rafId = null;
+    }
+    pitchAnimRef.current.direction = 0;
+  };
+
+  // Toggle all features visibility
+  const toggleFeatures = () => {
+    const newShowFeatures = !showFeatures;
+    setShowFeatures(newShowFeatures);
     
-    if (viewer && dataSource) {
-      viewer.dataSources.remove(dataSource);
-      dataSourcesRef.current[layerName] = null;
-    }
-  };
-
-  // Toggle layer visibility
-  const toggleLayer = async (layerName) => {
-    const newLayers = { ...layers, [layerName]: !layers[layerName] };
-    setLayers(newLayers);
-
-    if (newLayers[layerName]) {
-      await loadLayer(layerName);
-    } else {
-      removeLayer(layerName);
+    if (dataSourcesRef.current.marsFeatures) {
+      dataSourcesRef.current.marsFeatures.show = newShowFeatures;
     }
   };
 
@@ -235,23 +309,49 @@ const MarsViewer = () => {
       }, false),
     });
 
-    // Set entity properties for info box
+    // Set entity properties for zoom
     entity.name = entity.properties.text.getValue();
-    entity.description = createPickedFeatureDescription(entity);
+    
+    // Set a comfortable zoom distance when clicking the camera button
+    // This creates an offset of 2 million meters from the feature
+    entity.viewFrom = new Cesium.Cartesian3(0, 0, 2000000);
   };
 
-  // Create HTML for the info box
-  const createPickedFeatureDescription = (entity) => {
-    const imageURL = entity.properties.imageURL?.getValue() || '';
-    const description = entity.properties.description?.getValue() || '';
-    const sourceURL = entity.properties.sourceURL?.getValue() || '';
-    const source = entity.properties.source?.getValue() || '';
+  // Handle camera zoom to feature
+  const zoomToFeature = (entity) => {
+    if (!viewerRef.current || !entity) return;
     
-    return `
-      ${imageURL ? `<img width="50%" style="float:left; margin: 0 1em 1em 0;" src="${imageURL}">` : ''}
-      <p>${description}</p>
-      ${sourceURL ? `<p>Source: <a target="_blank" href="${sourceURL}">${source}</a></p>` : ''}
-    `;
+    viewerRef.current.flyTo(entity, {
+      offset: new Cesium.HeadingPitchRange(0, -0.5, 2000000)
+    });
+  };
+
+  // Camera pitch helpers (UI buttons)
+  const pitchUp = () => {
+    if (!viewerRef.current) return;
+    const controller = viewerRef.current.scene.screenSpaceCameraController;
+    controller.enableTilt = true;
+    viewerRef.current.camera.lookUp(Cesium.Math.toRadians(5));
+  };
+
+  const pitchDown = () => {
+    if (!viewerRef.current) return;
+    const controller = viewerRef.current.scene.screenSpaceCameraController;
+    controller.enableTilt = true;
+    viewerRef.current.camera.lookDown(Cesium.Math.toRadians(5));
+  };
+
+  const resetPitch = () => {
+    if (!viewerRef.current || !initialCameraRef.current) return;
+    viewerRef.current.camera.flyTo({
+      destination: initialCameraRef.current.destination,
+      orientation: {
+        heading: initialCameraRef.current.heading,
+        pitch: initialCameraRef.current.pitch,
+        roll: initialCameraRef.current.roll,
+      },
+      duration: 1.2
+    });
   };
 
   // Enable add point mode
@@ -290,8 +390,8 @@ const MarsViewer = () => {
         const globePosition = viewer.scene.globe.pick(ray, viewer.scene);
         console.log('Globe position:', globePosition);
         if (!globePosition) {
-          console.log('Failed to get position');
-          return;
+        console.log('Failed to get position');
+        return;
         }
       }
 
@@ -318,15 +418,15 @@ const MarsViewer = () => {
   const handleSubmit = async () => {
     if (!newPointData || !viewerRef.current) return;
     
-    // Ensure landing sites layer is loaded
-    if (!dataSourcesRef.current.landingSites) {
-      await loadLayer('landingSites');
+    // Ensure Mars features layer is loaded
+    if (!dataSourcesRef.current.marsFeatures) {
+      await loadMarsFeatures();
     }
 
     const { longitude, latitude, position } = newPointData;
 
-    // Create new entity in landing sites layer
-    const entity = dataSourcesRef.current.landingSites.entities.add({
+    // Create new entity in Mars features layer
+    const entity = dataSourcesRef.current.marsFeatures.entities.add({
       position: position,
       properties: {
         text: formData.text,
@@ -367,7 +467,7 @@ const MarsViewer = () => {
       console.error('Error saving to Supabase:', error);
       alert('Failed to save point. Please try again.');
       // Remove the entity if save failed
-      dataSourcesRef.current.landingSites.entities.remove(entity);
+      dataSourcesRef.current.marsFeatures.entities.remove(entity);
     }
 
     // Reset form and close dialog
@@ -431,7 +531,7 @@ const MarsViewer = () => {
         </button>
       </div>
 
-      {/* Layer Control Panel */}
+      {/* Feature Toggle Panel */}
       <div style={{
         position: 'absolute',
         top: '10px',
@@ -443,16 +543,13 @@ const MarsViewer = () => {
         fontFamily: 'Arial, sans-serif',
         minWidth: '200px'
       }}>
-        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Data Layers</h3>
-        <p style={{ fontSize: '10px', color: '#ccc', margin: '0 0 10px 0', fontStyle: 'italic' }}>
-          Note: Large datasets are limited for performance
-        </p>
+        <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Display Options</h3>
         
-        <label style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
           <input
             type="checkbox"
-            checked={layers.landingSites}
-            onChange={() => toggleLayer('landingSites')}
+            checked={showFeatures}
+            onChange={toggleFeatures}
             style={{ marginRight: '8px', cursor: 'pointer' }}
           />
           <span style={{ fontSize: '14px', display: 'flex', alignItems: 'center' }}>
@@ -464,10 +561,218 @@ const MarsViewer = () => {
               marginRight: '8px',
               display: 'inline-block'
             }}></span>
-            Landing Sites
+            Show Mars Features
           </span>
         </label>
+
+        {/* Smooth Pitch Buttons (press and hold) */}
+        <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          <button
+            onMouseDown={() => startPitch(1)}
+            onMouseUp={stopPitch}
+            onMouseLeave={stopPitch}
+            onTouchStart={() => startPitch(1)}
+            onTouchEnd={stopPitch}
+            title="Hold to pitch up"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬆︎ Hold
+          </button>
+          <button
+            onMouseDown={() => startPitch(-1)}
+            onMouseUp={stopPitch}
+            onMouseLeave={stopPitch}
+            onTouchStart={() => startPitch(-1)}
+            onTouchEnd={stopPitch}
+            title="Hold to pitch down"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬇︎ Hold
+          </button>
+        </div>
+
+        {/* Pitch Controls */}
+        <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          <button
+            onClick={pitchUp}
+            title="Pitch Up (Arrow Up)"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬆︎ Pitch
+          </button>
+          <button
+            onClick={pitchDown}
+            title="Pitch Down (Arrow Down)"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⬇︎ Pitch
+          </button>
+          <button
+            onClick={resetPitch}
+            title="Reset Pitch"
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              padding: '6px 8px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            ⟲ Reset
+          </button>
+        </div>
       </div>
+
+      {/* Custom Info Box */}
+      {selectedFeature && (
+        <div style={{
+          position: 'absolute',
+          top: '200px',
+          left: '10px',
+          maxWidth: '350px',
+          maxHeight: '60vh',
+          overflowY: 'auto',
+          background: 'rgba(0, 0, 0, 0.85)',
+          borderRadius: '8px',
+          padding: '0',
+          fontFamily: 'Arial, sans-serif',
+          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(10px)'
+        }}>
+          {/* Header with title and buttons */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 15px',
+            background: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '8px 8px 0 0',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              fontSize: '16px', 
+              color: 'white',
+              flex: 1
+            }}>
+              {selectedFeature.name}
+            </h3>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => zoomToFeature(selectedFeature.entity)}
+                style={{
+                  background: 'rgba(76, 175, 80, 0.8)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+                title="Zoom to feature"
+              >
+                📷 Zoom
+              </button>
+              <button
+                onClick={() => setSelectedFeature(null)}
+                style={{
+                  background: 'rgba(244, 67, 54, 0.8)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div style={{ padding: '15px' }}>
+            {selectedFeature.imageURL && (
+              <img 
+                src={selectedFeature.imageURL} 
+                alt={selectedFeature.name}
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  borderRadius: '6px',
+                  marginBottom: '12px'
+                }}
+              />
+            )}
+            
+            <p style={{
+              color: 'white',
+              fontSize: '14px',
+              lineHeight: '1.6',
+              margin: '0 0 12px 0'
+            }}>
+              {selectedFeature.description}
+            </p>
+            
+            {selectedFeature.sourceURL && (
+              <p style={{
+                color: '#aaa',
+                fontSize: '12px',
+                margin: '0'
+              }}>
+                <strong>Source:</strong>{' '}
+                <a 
+                  href={selectedFeature.sourceURL} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#4fc3f7',
+                    textDecoration: 'none'
+                  }}
+                >
+                  {selectedFeature.source}
+                </a>
+              </p>
+            )}
+      </div>
+        </div>
+      )}
 
       {/* Add Point Dialog */}
       {showDialog && (
