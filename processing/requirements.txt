@@ -1,0 +1,10 @@
+# Minimal Python packages if you are NOT using Conda.
+# For Conda users, prefer: `conda install -c conda-forge gdal` and install AWS CLI v2 via the official installer.
+
+# Core GIS tooling (provides gdal_edit.py, gdal_translate, gdal2tiles.py scripts)
+GDAL>=3.6
+
+# Optional: only needed if you use --upload to Cloudflare R2
+awscli>=1.32
+
+
